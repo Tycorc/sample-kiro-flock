@@ -1,0 +1,20 @@
+node_modules/
+dist/
+cdk.out/
+*.js.map
+.env
+.aga.config.json
+.vscode/
+.kiro/
+.playwright-mcp/
+
+# Security scan outputs
+holmes-results/
+retire-results/
+retire.json
+retire-output.json
+retirejs-results/
+scan-results/
+security-results/
+scan-report.json
+scan-resolution.md
