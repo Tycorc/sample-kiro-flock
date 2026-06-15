@@ -1030,3 +1030,150 @@ In a phased deployment, the chronicle would show: "Phase 1 ran. Phase 2 started.
 In a simultaneous launch, the chronicle shows: "At iteration 2, babel-spec produced a draft grammar. babel-compiler hadn't seen it yet and was working from the embedded sketch. By iteration 4, compiler agents observed the real grammar and pivoted. Meanwhile babel-stdlib agent-7 noticed agent-4 had already claimed the math module and shifted to strings. babel-qa flagged a type mismatch between stdlib and the spec on iteration 5, and the fix loop resolved it by iteration 7."
 
 That's stigmergy in action. That's the story. That's what proves the system works. You only get that story if you let the chaos happen.
+
+
+---
+
+## 17. Post-Convergence Integration Audit with graphify
+
+After a WeltenBuilder deployment converges, you want one last independent check: did the teams actually integrate, or did they each build something internally coherent that doesn't connect? Section 13 (contracts cluster) and the QA cluster are *prevention* — they push teams toward the same contract while work is happening. This section is *detection* — a structural audit, run once at the end, that confirms the seams are real.
+
+The tool is `graphify` (a separate, installed skill: `~/.kiro/skills/graphify/SKILL.md`). It turns a folder of files into a knowledge graph with community detection, "god nodes" (the most-connected concepts), and "surprising connections" (links that cross file/module boundaries). Its decisive feature for us is **cross-folder merge**: point it at several folders and it builds one graph spanning all of them.
+
+**This is detection, not prevention. It complements — never replaces — the contracts cluster (section 13) and the QA cluster. Run it at convergence or a milestone, not per iteration.**
+
+### Why this maps onto WeltenBuilder one-to-one
+
+WeltenBuilder's data model is one folder per team: `environment/{cluster_id}/`. graphify's multi-folder merge lands on that exactly:
+
+| graphify concept | WeltenBuilder meaning |
+|------------------|----------------------|
+| A detected community | A team (its `environment/{cluster_id}/` folder) |
+| A god node | A shared contract, type, or endpoint everything depends on |
+| A cross-community edge | A real integration seam between two teams |
+| A **missing** edge where two teams *should* connect | A naming / contract mismatch — the #1 WeltenBuilder failure mode (section 13) |
+
+So graphify gives the incubator an independent, structural, post-convergence view of integration health that does not rely on the teams' own self-reporting.
+
+### Why this is incubator-safe
+
+Running graphify is **analysis**, not project authorship. It reads the downloaded environment and writes only to `graphify-out/` on the operator's machine. It never writes into a team's `environment/{cluster_id}/`, never uploads, never touches a cluster. That keeps the incubator-only rule (section 1) intact: the local agent still produces zero project artifacts. `graphify-out/` is operator-side analysis, which is allowed — exactly like reading the chronicle or downloading results for delivery.
+
+### Prerequisites
+
+graphify ships native Kiro support. If it isn't installed:
+
+```bash
+uv tool install graphifyy            # PyPI package is "graphifyy"; CLI is "graphify"
+graphify kiro install                # registers .kiro/skills/ + .kiro/steering/graphify.md
+```
+
+For a headless run on AWS (the incubator already has IAM via the same account as the flock), use the Bedrock backend so there are **no API keys to manage**:
+
+```bash
+uv tool install "graphifyy[bedrock]"            # IAM, no API key
+uv tool install "graphifyy[terraform]"          # only if teams emit .tf/.hcl you want in the graph
+```
+
+Code is extracted locally (tree-sitter, no API calls). Only docs/markdown/PDF nodes cost tokens — and team contracts are often markdown, so a contract-heavy audit will use the model. Budget for it; this is a batch operation, not a loop.
+
+### The 6-step workflow
+
+1. **Confirm convergence first.** Run a parallel `cluster_status` sweep across every cluster. Every feature team must show `CONVERGED` in its README and QA must have signed off (no open `qa-feedback.md`). Auditing a half-converged deployment produces noise — absent edges that just haven't been written yet. Do not start until the system is settled.
+
+2. **Download the whole tree.** Call `env_download_all` **with no `cluster_id`** — that pulls every cluster's `environment/` as one zip. (Reuse this; do not reimplement download.)
+
+   ```
+   env_download_all()        # omit cluster_id → all clusters
+   ```
+
+3. **Unzip to a working folder.** The tree contains `environment/team-frontend/`, `environment/team-backend/`, `environment/platform-contracts/`, etc. — each team is a sibling subfolder. Add a `.graphifyignore` so the audit graphs only team content and never the convergence logs:
+
+   ```
+   # .graphifyignore  (gitignore syntax)
+   store/
+   **/store/
+   *.ndjson
+   node_modules/
+   ```
+
+   This mechanically enforces the boundary below: graphify never sees `store/*.ndjson`.
+
+4. **Run the cross-folder merge** over the per-team subfolders:
+
+   ```bash
+   graphify environment/platform-contracts environment/team-backend \
+            environment/team-frontend environment/team-data \
+            environment/project-consolidate
+   ```
+
+   (Equivalently: build per-team graphs and `graphify merge-graphs a.json b.json --out merged.json`. The single multi-folder run is simpler and is preferred.)
+
+5. **Read the report.** Open `graphify-out/GRAPH_REPORT.md` and look at three sections:
+   - **God nodes** → should include the shared contract types / endpoints from `platform-contracts`. If a contract type is *not* a god node, few teams actually reference it.
+   - **Surprising connections** → the real cross-team seams (e.g. frontend ↔ backend). Confirm the seams you expect exist.
+   - **Suggested questions** → graphify's own pointers to what's worth probing.
+   Then run targeted contract-compliance checks (next subsection).
+
+6. **Turn findings into action — through the existing machinery, not by hand.** The incubator never fixes code. It nudges the responsible team:
+   - `direction_set(cluster_id="team-frontend", ...)` to add a corrective instruction, or
+   - `mapreduce_exec` map directive to that team's idle agents (section 15), or
+   - frame it the way QA does so the fix loop (section 8 / section 13) picks it up: the team's own QA writes `qa-feedback.md`, the team removes `CONVERGED`, fixes, re-appends.
+   Then **re-run the audit** after the fix loop settles. Audit → nudge → re-audit is the loop.
+
+### Contract-compliance recipe (the `graphify path` check)
+
+The sharpest single check: does a feature team actually reference the platform contract, or did it quietly invent its own names?
+
+```bash
+graphify path "ApiContract" "FrontendClient"
+```
+
+- A path exists → the frontend is structurally connected to the contract. Good.
+- **No path** → the team ignored the contract (renamed the type, forged its own endpoint shape). This is exactly the failure section 13 exists to prevent and QA is supposed to catch. Raise it as a **CRITICAL** finding and trigger that team's fix loop (via `qa-feedback.md` semantics or a `mapreduce` map directive).
+
+Run one `graphify path` per (contract type → consuming team) pair you care about. Absent paths are the headline output of the audit.
+
+### Worked example
+
+A five-team deployment converges: `platform-contracts`, `team-backend`, `team-frontend`, `team-data`, `project-consolidate`.
+
+```
+1. cluster_status sweep → all five CONVERGED, no open qa-feedback.md
+2. env_download_all()  → audit-download.zip
+3. unzip; add .graphifyignore (store/, *.ndjson)
+4. graphify environment/platform-contracts environment/team-backend \
+            environment/team-frontend environment/team-data \
+            environment/project-consolidate
+5. graphify-out/GRAPH_REPORT.md:
+     God nodes: ApiContract, UserDTO, /api/orders   ← contract types are central ✓
+     Surprising connections: BackendOrderService ↔ FrontendOrderView ✓ (expected seam present)
+                             DataPipeline ↔ (nothing in frontend)      ← investigate
+6. graphify path "ApiContract" "FrontendClient"   → path found ✓
+   graphify path "UserDTO" "DataPipeline"          → NO PATH  ✗  CRITICAL
+7. Action: mapreduce_exec map → team-data idle agents:
+     "Your output does not reference UserDTO from environment/platform-contracts/.
+      Re-read the contract and align your record shape to it."
+   Re-run audit after the fix loop settles → path now found ✓
+```
+
+The frontend↔backend seam being a "surprising connection" is the audit *confirming* integration. The `UserDTO → DataPipeline` absent path is the audit *catching* a mismatch QA missed.
+
+### When to skip the audit
+
+- **Single-cluster deployments** — no cross-team seams to audit.
+- **Research / ideation tasks** — no contract, no "correct" integration to verify.
+- **Non-integrating teams** — clusters writing to disjoint paths that never reference each other (separate documents, independent content). There is no seam to find.
+- **Before convergence** — see step 1. Auditing mid-run produces false "missing edges."
+
+### Hard boundaries (do not cross)
+
+- **Detection, not prevention.** graphify augments the contracts cluster and QA cluster; it does not replace either. The fix still happens inside clusters.
+- **Convergence-only / batch.** Never run graphify per iteration — it is batch and costs tokens. Run it at convergence or a defined milestone.
+- **Not for `store/` logs.** Convergence and agent-behaviour analysis stays with `store_read_all` and the kiro-flock skill's log analysis. graphify is for `environment/` content, never `store/*.ndjson` (the `.graphifyignore` above enforces this).
+- **Not a live monitor.** graphify does not replace `cluster_status` / `stream_logs`. It is a snapshot, not a feed.
+- **Incubator-only.** The audit writes only to `graphify-out/` on the operator machine. It never writes into a team environment, never uploads, never starts/stops a cluster. The incubator-only rule (section 1) holds.
+
+### Optional convenience wrapper
+
+If you run this often, `kiro-flock-mcp/scripts/audit-integration.sh` chains the operator-side steps (download path → `.graphifyignore` → multi-folder `graphify --backend bedrock` → surface the three report sections, plus optional `graphify path` contract checks). It is an **operator/incubator-side tool only** — it shells out to graphify and reads a local download. Nothing in the EC2 agent loop or the Lambda changes for this feature. See the script header for usage.
