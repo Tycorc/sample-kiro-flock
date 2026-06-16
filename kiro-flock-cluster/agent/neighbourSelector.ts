@@ -39,7 +39,9 @@ export function amorphousNeighbours(
   if (radius <= 0 || concurrency <= 1) return [];
   const neighbours: number[] = [];
   for (let d = 1; d <= radius; d++) {
-    neighbours.push((agentIndex - d + concurrency) % concurrency);
+    // Double-mod keeps the backward neighbour non-negative even when
+    // radius >= concurrency (a single `+ concurrency` only corrects one wrap).
+    neighbours.push(((agentIndex - d) % concurrency + concurrency) % concurrency);
     neighbours.push((agentIndex + d) % concurrency);
   }
   return Array.from(new Set(neighbours))

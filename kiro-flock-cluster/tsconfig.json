@@ -12,5 +12,5 @@
     "declaration": true,
     "sourceMap": true
   },
-  "exclude": ["node_modules", "dist", "cdk.out"]
+  "exclude": ["node_modules", "dist", "cdk.out", "**/*.test.ts"]
 }

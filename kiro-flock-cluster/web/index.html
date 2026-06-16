@@ -501,6 +501,9 @@
       var marked = document.createElement('script');
       marked.src = 'https://cdn.jsdelivr.net/npm/marked@15/marked.min.js';
       document.currentScript.parentNode.appendChild(marked);
+      var purify = document.createElement('script');
+      purify.src = 'https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js';
+      document.currentScript.parentNode.appendChild(purify);
       var hljsCss = document.createElement('link');
       hljsCss.rel = 'stylesheet';
       hljsCss.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css';
