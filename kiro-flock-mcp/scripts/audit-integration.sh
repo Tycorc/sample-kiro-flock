@@ -120,28 +120,49 @@ echo "teams   : ${#team_dirs[@]}"
 for d in "${team_dirs[@]}"; do echo "          - $d"; done
 echo
 
-# Cross-team seams come from SEMANTIC extraction (LLM). AST-only (no backend/key) builds the
-# graph but will NOT connect a symbol referenced in one team to its definition in another —
-# so missing-edge detection is unreliable. Warn, but still run (plumbing/code structure).
-_keys="${AUDIT_BACKEND}${OPENAI_API_KEY:-}${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${ANTHROPIC_API_KEY:-}${DEEPSEEK_API_KEY:-}${MOONSHOT_API_KEY:-}"
-if [[ -z "$_keys" ]]; then
-  echo "WARNING: no backend or API key detected -> AST-only extraction." >&2
-  echo "         Cross-team seam / missing-edge detection is UNRELIABLE without semantic" >&2
-  echo "         extraction. Set AUDIT_BACKEND (or an API key), or AUDIT_BACKEND=ollama for" >&2
-  echo "         a local model. The pipeline still runs but seams will be under-reported." >&2
-  echo >&2
-fi
+# Cross-team seams come from SEMANTIC extraction (an LLM backend). The CLI builds ONE path at
+# a time, so a cross-folder graph = build each team's graph + merge-graphs.
+#
+# CRITICAL: `graphify extract` defaults to the bedrock backend when a folder contains docs
+# (and every team has README.md / qa-feedback.md). Without a usable backend that call HARD-FAILS
+# (e.g. "requires boto3") and `set -e` would abort the whole audit. So we only call `extract`
+# when a backend is actually available; otherwise we fall back to `graphify update` (AST/code-only,
+# no LLM) which never invokes a model. Code-only still builds and merges each team's code graph,
+# but markdown contracts and cross-team symbol resolution are under-reported.
+#
+# A backend is "available" if AUDIT_BACKEND is set (incl. ollama / bedrock-via-IAM) or any
+# provider API key is exported.
+_have_key=""
+for v in "${OPENAI_API_KEY:-}" "${GEMINI_API_KEY:-}" "${GOOGLE_API_KEY:-}" \
+         "${ANTHROPIC_API_KEY:-}" "${DEEPSEEK_API_KEY:-}" "${MOONSHOT_API_KEY:-}"; do
+  [[ -n "$v" ]] && _have_key=1
+done
+SEMANTIC=""
+[[ -n "$AUDIT_BACKEND" || -n "$_have_key" ]] && SEMANTIC=1
 
-# The CLI builds ONE path at a time; a cross-folder graph = extract per team + merge-graphs.
-# --force: always overwrite each team's graph even if a re-audit (post-fix) has fewer nodes,
-# so the audit reflects current downloaded state and clears ghost duplicates (skill section 17).
 backend_args=()
 [[ -n "$AUDIT_BACKEND" ]] && backend_args=(--backend "$AUDIT_BACKEND")
 
+if [[ -z "$SEMANTIC" ]]; then
+  echo "WARNING: no backend or API key detected -> falling back to code-only extraction" >&2
+  echo "         (graphify update, no LLM). Cross-team seam / missing-edge detection is" >&2
+  echo "         UNRELIABLE without semantic extraction. Set AUDIT_BACKEND" >&2
+  echo "         (gemini|kimi|claude|openai|deepseek|ollama) or a provider API key for a" >&2
+  echo "         full audit. The pipeline still runs (code structure only)." >&2
+  echo >&2
+fi
+
+# --force: overwrite each team's graph even if a re-audit (post-fix) has fewer nodes, so the
+# audit reflects current downloaded state and clears ghost duplicates (skill section 17).
 graph_jsons=()
 for d in "${team_dirs[@]}"; do
-  echo "-- extracting: $d"
-  "$GRAPHIFY_BIN" extract "$d" --force "${backend_args[@]}"
+  if [[ -n "$SEMANTIC" ]]; then
+    echo "-- extracting (semantic): $d"
+    "$GRAPHIFY_BIN" extract "$d" "${backend_args[@]}"
+  else
+    echo "-- extracting (code-only): $d"
+    "$GRAPHIFY_BIN" update "$d" --force
+  fi
   gj="$d/graphify-out/graph.json"
   if [[ -f "$gj" ]]; then
     graph_jsons+=("$gj")
@@ -193,10 +214,15 @@ if [[ -n "$AUDIT_PAIRS" ]]; then
     echo "--- path: \"$src\" -> \"$dst\""
     path_out="$("$GRAPHIFY_BIN" path "$src" "$dst" 2>&1)"
     echo "$path_out"
-    # graphify path exits 0 even when no path exists, so detect the text.
-    if echo "$path_out" | grep -qiE "no path found|not found in"; then
-      echo "  !! NO PATH — '$dst' does not reference '$src'. CRITICAL: trigger that team's fix loop"
-      echo "     (qa-feedback.md semantics or a mapreduce map directive). See skill section 17."
+    # graphify path exits 0 in all cases; detect the negative outcomes by text.
+    # Validated against graphify 0.8.39: "No path found between '..' and '..'."
+    # (both nodes exist but are unconnected) and "No node matching '..' found."
+    # (the type/client is absent from the graph entirely — an even stronger
+    # signal). Treat both as CRITICAL.
+    if echo "$path_out" | grep -qiE "no path found|no node matching"; then
+      echo "  !! NO LINK — no structural path between '$src' and '$dst' (or one is absent"
+      echo "     from the graph). CRITICAL: trigger that team's fix loop (qa-feedback.md"
+      echo "     semantics or a mapreduce map directive). See skill section 17."
     fi
   done
 fi
