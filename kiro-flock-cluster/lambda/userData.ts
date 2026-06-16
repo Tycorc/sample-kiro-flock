@@ -67,6 +67,10 @@ cd /tmp
 curl --proto '=https' --tlsv1.2 -sSf \\
   'https://desktop-release.q.us-east-1.amazonaws.com/latest/kirocli-aarch64-linux.zip' \\
   -o /tmp/kirocli.zip
+# Integrity: fail fast if the download is truncated or corrupt before we run
+# its installer. For supply-chain authenticity, pin a vendor-published digest
+# here (e.g. echo "<sha256>  /tmp/kirocli.zip" | sha256sum -c -) once available.
+unzip -t -q /tmp/kirocli.zip
 unzip -q -o /tmp/kirocli.zip -d /tmp
 yes | /tmp/kirocli/install.sh || /tmp/kirocli/install.sh --no-confirm || true
 KIRO_INSTALL

@@ -38,30 +38,39 @@
   // (loaded via CDN in the host page), falls back to a basic hand-rolled
   // parser for headings, bold, code blocks, and lists.
   function renderMarkdown(text) {
+    let html;
     if (typeof marked !== "undefined" && marked.parse) {
-      return marked.parse(text);
+      html = marked.parse(text);
+    } else {
+      // Fallback: basic parsing without table support.
+      html = text
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
+        `<pre><code>${code.trim()}</code></pre>`);
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+      html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+      html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+      html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      html = html.replace(/^---+$/gm, "<hr>");
+      html = html.replace(/^&gt; (.+)$/gm, "<blockquote>$1</blockquote>");
+      html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+      html = html.replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
+      html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+      html = html.split("\n").map((line) => {
+        if (!line.trim()) return "";
+        if (/^<(h[1-3]|ul|ol|li|pre|blockquote|hr)/.test(line)) return line;
+        return `<p>${line}</p>`;
+      }).join("\n");
     }
-    // Fallback: basic parsing without table support.
-    let html = text
+    // Sanitize before the caller injects via innerHTML. Environment files are
+    // agent-authored content, so unsanitized markdown is a stored-XSS vector.
+    // Falls back to plain-text escaping if DOMPurify isn't on the host page.
+    if (typeof DOMPurify !== "undefined" && DOMPurify.sanitize) {
+      return DOMPurify.sanitize(html);
+    }
+    return String(text)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
-      `<pre><code>${code.trim()}</code></pre>`);
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/^---+$/gm, "<hr>");
-    html = html.replace(/^&gt; (.+)$/gm, "<blockquote>$1</blockquote>");
-    html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
-    html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
-    html = html.split("\n").map((line) => {
-      if (!line.trim()) return "";
-      if (/^<(h[1-3]|ul|ol|li|pre|blockquote|hr)/.test(line)) return line;
-      return `<p>${line}</p>`;
-    }).join("\n");
-    return html;
   }
 
   // Extension → highlight.js language map for source files. If a file

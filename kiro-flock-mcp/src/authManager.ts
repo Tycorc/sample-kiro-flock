@@ -12,8 +12,10 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { writeFileSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 interface TokenSet {
   idToken: string;
@@ -110,21 +112,35 @@ export class AuthManager {
   // ── Silent refresh via AWS CLI ────────────────────────────────────────────
 
   private async tryRefresh(refreshToken: string): Promise<TokenSet | null> {
+    // Pass the refresh token via a 0600 temp file (--cli-input-json) instead of
+    // an inline --auth-parameters flag, and invoke the CLI with an argument
+    // array (execFileSync, no shell). This keeps the secret out of the process
+    // argv (visible to `ps`) and removes any shell-interpolation surface.
+    let inputDir: string | null = null;
     try {
       log("Attempting silent token refresh...");
-      const profileArgs = this.awsProfile ? `--profile ${this.awsProfile}` : "";
-      const cmd = [
-        `aws cognito-idp admin-initiate-auth`,
-        `--region ${this.region}`,
-        `--user-pool-id ${this.userPoolId}`,
-        `--client-id ${this.clientId}`,
-        `--auth-flow REFRESH_TOKEN_AUTH`,
-        `--auth-parameters "REFRESH_TOKEN=${refreshToken}"`,
-        `--output json`,
-        profileArgs,
-      ].filter(Boolean).join(" ");
+      inputDir = mkdtempSync(join(tmpdir(), "kff-auth-"));
+      const inputPath = join(inputDir, "auth.json");
+      writeFileSync(
+        inputPath,
+        JSON.stringify({
+          UserPoolId: this.userPoolId,
+          ClientId: this.clientId,
+          AuthFlow: "REFRESH_TOKEN_AUTH",
+          AuthParameters: { REFRESH_TOKEN: refreshToken },
+        }),
+        { mode: 0o600 },
+      );
 
-      const output = execSync(cmd, { encoding: "utf-8", timeout: 15_000 });
+      const args = [
+        "cognito-idp", "admin-initiate-auth",
+        "--region", this.region,
+        "--cli-input-json", `file://${inputPath}`,
+        "--output", "json",
+      ];
+      if (this.awsProfile) args.push("--profile", this.awsProfile);
+
+      const output = execFileSync("aws", args, { encoding: "utf-8", timeout: 15_000 });
       const parsed = JSON.parse(output);
       const authResult = parsed.AuthenticationResult;
       const newIdToken = authResult.IdToken as string;
@@ -139,6 +155,10 @@ export class AuthManager {
     } catch (err) {
       log(`Silent refresh failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;
+    } finally {
+      if (inputDir) {
+        try { rmSync(inputDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
     }
   }
 
@@ -267,12 +287,15 @@ function decodeTokenExpiry(jwt: string): number {
 function openBrowser(url: string): void {
   try {
     const platform = process.platform;
+    // Pass the URL as a discrete argument (no shell), so it cannot be
+    // interpreted as a shell command regardless of its contents.
     if (platform === "darwin") {
-      execSync(`open "${url}"`);
+      execFileSync("open", [url]);
     } else if (platform === "win32") {
-      execSync(`start "" "${url}"`);
+      // `start` is a cmd builtin; the empty "" is its title argument.
+      execFileSync("cmd", ["/c", "start", "", url]);
     } else {
-      execSync(`xdg-open "${url}"`);
+      execFileSync("xdg-open", [url]);
     }
   } catch {
     logAlways(`Could not open browser automatically. Open this URL manually:\n${url}`);
