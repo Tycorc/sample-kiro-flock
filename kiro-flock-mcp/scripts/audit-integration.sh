@@ -32,7 +32,7 @@
 #
 # Options (env vars):
 #   GRAPHIFY_BIN     graphify executable (default: graphify)
-#   AUDIT_BACKEND    extraction backend: gemini|kimi|claude|openai|deepseek|ollama
+#   AUDIT_BACKEND    extraction backend: azure|bedrock|claude|claude-cli|deepseek|gemini|kimi|ollama|openai
 #                    (default: unset -> if no API key is set either, the audit falls back to
 #                    code-only `graphify update` (no LLM, no crash); markdown contracts and
 #                    cross-team seams are then under-reported. Set this or a key for a full audit.
@@ -62,7 +62,7 @@ subfolder of <download-dir>/environment is treated as a team.
 
 Env vars:
   GRAPHIFY_BIN    graphify executable (default: graphify)
-  AUDIT_BACKEND   backend: gemini|kimi|claude|openai|deepseek|ollama (default: auto-detect from API key; code-only needs none)
+  AUDIT_BACKEND   backend: azure|bedrock|claude|claude-cli|deepseek|gemini|kimi|ollama|openai (default: auto-detect from API key; code-only needs none)
   AUDIT_PAIRS     contract checks, ';'-separated "Type>Consumer", e.g. "ApiContract>FrontendClient;UserDTO>DataPipeline"
 
 Prerequisites: convergence confirmed first; graphify installed (uv tool install graphifyy);
@@ -149,7 +149,7 @@ if [[ -z "$SEMANTIC" ]]; then
   echo "WARNING: no backend or API key detected -> falling back to code-only extraction" >&2
   echo "         (graphify update, no LLM). Cross-team seam / missing-edge detection is" >&2
   echo "         UNRELIABLE without semantic extraction. Set AUDIT_BACKEND" >&2
-  echo "         (gemini|kimi|claude|openai|deepseek|ollama) or a provider API key for a" >&2
+  echo "         (azure|bedrock|claude|claude-cli|deepseek|gemini|kimi|ollama|openai) or a provider API key for a" >&2
   echo "         full audit. The pipeline still runs (code structure only)." >&2
   echo >&2
 fi
