@@ -1038,7 +1038,7 @@ That's stigmergy in action. That's the story. That's what proves the system work
 
 After a WeltenBuilder deployment converges, you want one last independent check: did the teams actually integrate, or did they each build something internally coherent that doesn't connect? Section 13 (contracts cluster) and the QA cluster are *prevention* — they push teams toward the same contract while work is happening. This section is *detection* — a structural audit, run once at the end, that confirms the seams are real.
 
-The tool is `graphify` (a separate, installed skill: `~/.kiro/skills/graphify/SKILL.md`). It turns a folder of files into a knowledge graph with community detection, "god nodes" (the most-connected concepts), and "surprising connections" (links that cross file/module boundaries). Its decisive feature for us is **cross-folder merge**: point it at several folders and it builds one graph spanning all of them.
+The tool is `graphify` (a separate, installed skill: `~/.kiro/skills/graphify/SKILL.md`). It turns a folder of files into a knowledge graph with community detection, "god nodes" (the most-connected concepts), and "surprising connections" (links that cross file/module boundaries). Its decisive feature for us is **cross-folder merge**: build a graph per team folder, then merge them into one graph spanning all teams (`graphify extract <folder>` per team → `graphify merge-graphs ...`).
 
 **This is detection, not prevention. It complements — never replaces — the contracts cluster (section 13) and the QA cluster. Run it at convergence or a milestone, not per iteration.**
 
@@ -1068,14 +1068,16 @@ uv tool install graphifyy            # PyPI package is "graphifyy"; CLI is "grap
 graphify kiro install                # registers .kiro/skills/ + .kiro/steering/graphify.md
 ```
 
-For a headless run on AWS (the incubator already has IAM via the same account as the flock), use the Bedrock backend so there are **no API keys to manage**:
+For docs/markdown contract extraction graphify needs a model backend. The installed CLI (0.8.39) accepts `gemini | kimi | claude | openai | deepseek | ollama` — set one matching API key, or run a local **ollama** for a no-API-key run:
 
 ```bash
-uv tool install "graphifyy[bedrock]"            # IAM, no API key
-uv tool install "graphifyy[terraform]"          # only if teams emit .tf/.hcl you want in the graph
+uv tool install graphifyy                       # CLI is "graphify"
+export OPENAI_API_KEY=...                        # or GEMINI_API_KEY / ANTHROPIC_API_KEY / ... ; or use --backend ollama
 ```
 
-Code is extracted locally (tree-sitter, no API calls). Only docs/markdown/PDF nodes cost tokens — and team contracts are often markdown, so a contract-heavy audit will use the model. Budget for it; this is a batch operation, not a loop.
+Code is extracted locally (tree-sitter, no API calls) — a code-only corpus needs no key and runs offline. Only docs/markdown/PDF nodes cost tokens, and team contracts are often markdown, so a contract-heavy audit will use the model. Budget for it; this is a batch operation, not a loop.
+
+**Important — cross-team seams need semantic extraction.** AST-only extraction (no backend) builds each team's *internal* structure but does **not** link a symbol used in one team to its definition in another: the merged graph keeps them as separate nodes, so `graphify path` returns "no path" and surprising-connections shows nothing — even when the code clearly imports across teams. That makes missing-edge findings unreliable without a backend. Run the audit **with a backend set** (semantic extraction resolves the cross-team references; `--mode deep` for richer inferred edges). Reserve code-only/offline runs for validating the pipeline, not for the seam audit itself. The script prints a warning when no backend is available.
 
 ### The 6-step workflow
 
@@ -1087,27 +1089,25 @@ Code is extracted locally (tree-sitter, no API calls). Only docs/markdown/PDF no
    env_download_all()        # omit cluster_id → all clusters
    ```
 
-3. **Unzip to a working folder.** The tree contains `environment/team-frontend/`, `environment/team-backend/`, `environment/platform-contracts/`, etc. — each team is a sibling subfolder. Add a `.graphifyignore` so the audit graphs only team content and never the convergence logs:
+3. **Unzip to a working folder.** The tree contains `environment/team-frontend/`, `environment/team-backend/`, `environment/platform-contracts/`, etc. — each team is a sibling subfolder. You extract each team folder individually in step 4, so only `environment/<team>/` content is ever in scope. The convergence logs in `store/` are a **sibling** of `environment/`, not inside any team folder, so they are excluded by construction (see the boundary below) — no ignore file needed.
 
-   ```
-   # .graphifyignore  (gitignore syntax)
-   store/
-   **/store/
-   *.ndjson
-   node_modules/
-   ```
-
-   This mechanically enforces the boundary below: graphify never sees `store/*.ndjson`.
-
-4. **Run the cross-folder merge** over the per-team subfolders:
+4. **Build a graph per team, then merge.** The CLI builds one path at a time, so extract each team folder, then merge the per-team graphs into one. `--force` makes re-audits reflect the current state even when a post-fix team has fewer nodes (and clears ghost duplicates):
 
    ```bash
-   graphify environment/platform-contracts environment/team-backend \
-            environment/team-frontend environment/team-data \
-            environment/project-consolidate
+   for t in platform-contracts team-backend team-frontend team-data project-consolidate; do
+     graphify extract "environment/$t" --force        # writes environment/$t/graphify-out/graph.json
+   done                                                 # add --backend <name> for markdown contracts
+   graphify merge-graphs \
+     environment/platform-contracts/graphify-out/graph.json \
+     environment/team-backend/graphify-out/graph.json \
+     environment/team-frontend/graphify-out/graph.json \
+     environment/team-data/graphify-out/graph.json \
+     environment/project-consolidate/graphify-out/graph.json \
+     --out graphify-out/graph.json
+   graphify cluster-only . --graph graphify-out/graph.json --no-label   # drop --no-label to LLM-name communities
    ```
 
-   (Equivalently: build per-team graphs and `graphify merge-graphs a.json b.json --out merged.json`. The single multi-folder run is simpler and is preferred.)
+   `cluster-only` runs Leiden community detection on the merged graph and (re)generates `GRAPH_REPORT.md`. Community *names* need a backend; the structural god-nodes and surprising-connections do not, so `--no-label` keeps the audit working with no API key. `kiro-flock-mcp/scripts/audit-integration.sh` automates this whole block.
 
 5. **Read the report.** Open `graphify-out/GRAPH_REPORT.md` and look at three sections:
    - **God nodes** → should include the shared contract types / endpoints from `platform-contracts`. If a contract type is *not* a god node, few teams actually reference it.
@@ -1141,10 +1141,11 @@ A five-team deployment converges: `platform-contracts`, `team-backend`, `team-fr
 ```
 1. cluster_status sweep → all five CONVERGED, no open qa-feedback.md
 2. env_download_all()  → audit-download.zip
-3. unzip; add .graphifyignore (store/, *.ndjson)
-4. graphify environment/platform-contracts environment/team-backend \
-            environment/team-frontend environment/team-data \
-            environment/project-consolidate
+3. unzip → environment/<team>/ siblings (store/ is a sibling, out of scope)
+4. for t in platform-contracts team-backend team-frontend team-data project-consolidate; do
+        graphify extract "environment/$t" --force; done
+   graphify merge-graphs environment/*/graphify-out/graph.json --out graphify-out/graph.json
+   graphify cluster-only . --graph graphify-out/graph.json --no-label
 5. graphify-out/GRAPH_REPORT.md:
      God nodes: ApiContract, UserDTO, /api/orders   ← contract types are central ✓
      Surprising connections: BackendOrderService ↔ FrontendOrderView ✓ (expected seam present)
@@ -1170,10 +1171,10 @@ The frontend↔backend seam being a "surprising connection" is the audit *confir
 
 - **Detection, not prevention.** graphify augments the contracts cluster and QA cluster; it does not replace either. The fix still happens inside clusters.
 - **Convergence-only / batch.** Never run graphify per iteration — it is batch and costs tokens. Run it at convergence or a defined milestone.
-- **Not for `store/` logs.** Convergence and agent-behaviour analysis stays with `store_read_all` and the kiro-flock skill's log analysis. graphify is for `environment/` content, never `store/*.ndjson` (the `.graphifyignore` above enforces this).
+- **Not for `store/` logs.** Convergence and agent-behaviour analysis stays with `store_read_all` and the kiro-flock skill's log analysis. graphify is for `environment/<team>/` content only. The audit extracts per-team folders; `store/` is a sibling never in scope, so logs are excluded by construction.
 - **Not a live monitor.** graphify does not replace `cluster_status` / `stream_logs`. It is a snapshot, not a feed.
 - **Incubator-only.** The audit writes only to `graphify-out/` on the operator machine. It never writes into a team environment, never uploads, never starts/stops a cluster. The incubator-only rule (section 1) holds.
 
 ### Optional convenience wrapper
 
-If you run this often, `kiro-flock-mcp/scripts/audit-integration.sh` chains the operator-side steps (download path → `.graphifyignore` → multi-folder `graphify --backend bedrock` → surface the three report sections, plus optional `graphify path` contract checks). It is an **operator/incubator-side tool only** — it shells out to graphify and reads a local download. Nothing in the EC2 agent loop or the Lambda changes for this feature. See the script header for usage.
+If you run this often, `kiro-flock-mcp/scripts/audit-integration.sh` chains the operator-side steps (per-team `graphify extract --force` → `merge-graphs` → `cluster-only` → surface the three report sections, plus optional `graphify path` contract checks). It is an **operator/incubator-side tool only** — it shells out to graphify and reads a local download. Nothing in the EC2 agent loop or the Lambda changes for this feature. See the script header for usage.
