@@ -1130,7 +1130,7 @@ graphify path "ApiContract" "FrontendClient"
 ```
 
 - A path exists → the frontend is structurally connected to the contract. Good.
-- **No path** → the team ignored the contract (renamed the type, forged its own endpoint shape). This is exactly the failure section 13 exists to prevent and QA is supposed to catch. Raise it as a **CRITICAL** finding and trigger that team's fix loop (via `qa-feedback.md` semantics or a `mapreduce` map directive).
+- **No path** → the team ignored the contract (renamed the type, forged its own endpoint shape). This is exactly the failure section 13 exists to prevent and QA is supposed to catch. Raise it as a **CRITICAL** finding and trigger that team's fix loop (via `qa-feedback.md` semantics or a `mapreduce` map directive). graphify reports either `No path found between '…' and '…'.` (both nodes exist but are unconnected) or `No node matching '…' found.` (the type/client is absent from the graph entirely — an even stronger signal); treat **both** as CRITICAL.
 
 Run one `graphify path` per (contract type → consuming team) pair you care about. Absent paths are the headline output of the audit.
 
