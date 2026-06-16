@@ -1068,7 +1068,7 @@ uv tool install graphifyy            # PyPI package is "graphifyy"; CLI is "grap
 graphify install --platform kiro     # registers .kiro/skills/ + .kiro/steering/graphify.md
 ```
 
-For docs/markdown contract extraction graphify needs a model backend. The installed CLI (0.8.39) accepts `gemini | kimi | claude | openai | deepseek | ollama` — set one matching API key, or run a local **ollama** for a no-API-key run:
+For docs/markdown contract extraction graphify needs a model backend. The installed CLI (0.8.39) accepts `azure | bedrock | claude | claude-cli | deepseek | gemini | kimi | ollama | openai` (this is the CLI's own validator list — its `--help` summary line shows only a subset). Set the matching API key for your choice, or pick a **no-API-key** path: `ollama` (local model), `bedrock` (AWS IAM — needs the `graphifyy[bedrock]` extra so boto3 is present), or `claude-cli` (your Claude subscription). On AWS, `bedrock` is the natural choice since the instance role already has IAM:
 
 ```bash
 uv tool install graphifyy                       # CLI is "graphify"
