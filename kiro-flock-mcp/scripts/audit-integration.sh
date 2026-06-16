@@ -16,9 +16,11 @@
 #   - A local unzip of `env_download_all()` (omit cluster_id → all clusters),
 #     i.e. a folder containing environment/<team>/ subfolders.
 #   - graphify installed:  uv tool install graphifyy        (CLI command: graphify)
-#   - a backend for docs/markdown contract extraction: set ONE API key
-#       (GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY ...)
-#       or run a local ollama. Code-only corpora extract offline with no key.
+#   - RECOMMENDED for a full audit: a semantic backend for docs/markdown contract extraction —
+#       set ONE API key (GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY ...)
+#       or AUDIT_BACKEND=ollama for a local model. With NO backend/key the audit still runs but
+#       falls back to code-only `graphify update` (no LLM); markdown contracts and cross-team
+#       seams are then under-reported.
 #
 # Usage:
 #   ./scripts/audit-integration.sh <download-dir> [team ...]
@@ -31,9 +33,9 @@
 # Options (env vars):
 #   GRAPHIFY_BIN     graphify executable (default: graphify)
 #   AUDIT_BACKEND    extraction backend: gemini|kimi|claude|openai|deepseek|ollama
-#                    (default: unset -> graphify auto-detects from whichever API key is
-#                    set). Code-only teams need no backend/key; markdown/PDF contracts do.
-#                    Use ollama for a fully-local, no-API-key run.
+#                    (default: unset -> if no API key is set either, the audit falls back to
+#                    code-only `graphify update` (no LLM, no crash); markdown contracts and
+#                    cross-team seams are then under-reported. Set this or a key for a full audit.
 #   AUDIT_PAIRS      optional contract-compliance checks, semicolon-separated
 #                    "Type>Consumer" pairs, e.g. "ApiContract>FrontendClient;UserDTO>DataPipeline"
 

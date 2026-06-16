@@ -1065,7 +1065,7 @@ graphify ships native Kiro support. If it isn't installed:
 
 ```bash
 uv tool install graphifyy            # PyPI package is "graphifyy"; CLI is "graphify"
-graphify kiro install                # registers .kiro/skills/ + .kiro/steering/graphify.md
+graphify install --platform kiro     # registers .kiro/skills/ + .kiro/steering/graphify.md
 ```
 
 For docs/markdown contract extraction graphify needs a model backend. The installed CLI (0.8.39) accepts `gemini | kimi | claude | openai | deepseek | ollama` — set one matching API key, or run a local **ollama** for a no-API-key run:
